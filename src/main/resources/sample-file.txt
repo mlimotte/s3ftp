@@ -1,0 +1,5 @@
+#Some sample data
+name|value
+a|1
+b|2
+
