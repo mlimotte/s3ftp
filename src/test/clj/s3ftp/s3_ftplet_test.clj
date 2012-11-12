@@ -2,26 +2,28 @@
   (:use s3ftp.s3_ftplet
         clojure.test
         s3ftp.util.test
-        clojure.contrib.mock.test-adapter)
+        ;clojure.contrib.mock.test-adapter
+        )
   (:require [s3ftp.Main :as main]
             [s3ftp.util [ftp :as ftp] [io :as io]]))
 
-(def *local-anon-ftp-url* "ftp://anonymous:blank@localhost:2221")
-(def *local-marc-test-ftp-url* "ftp://test1:test@localhost:2221")
-(def *ftp-url* *local-marc-test-ftp-url*)
+(def local-anon-ftp-url "ftp://anonymous:blank@localhost:2221")
+(def local-marc-test-ftp-url "ftp://test1:test@localhost:2221")
+(def ftp-url local-marc-test-ftp-url)
 
-(def *start-server* true)
-;(def *start-server* false)
+(def start-server? true)
+;(def start-server? false)
 
 ;;; Fixtures and Mocks
 
 (defn start-server [f]
-  (let [srvr (if *start-server* (main/-main))]
+  (let [srvr (if start-server? (main/-main))]
     (f)
     (if srvr (.stop srvr))))
 
+(def ^:dynamic *client*)
 (defn ftp-connect [f]
-  (with-bindings {(def *client*) (ftp/mk-client *ftp-url*)}
+  (with-redefs [*client* (ftp/mk-client ftp-url)]
     (f)
     (.disconnect *client*)))
 
@@ -42,15 +44,6 @@
 
 ;;; The Tests
 
-;(deftest abs-with-trail-slash-test
-;  (is (abs-with-trail-slash? "/foo/"))
-;  (is (abs-with-trail-slash? "/foo/bar/"))
-;  (is (abs-with-trail-slash? "/"))
-;  (is (not (abs-with-trail-slash? "/foo")))
-;  (is (not (abs-with-trail-slash? "")))
-;  (is (not (abs-with-trail-slash? "/..")))
-;  )
-;
 ;(deftest normalize-ftp-path-test
 ;  (is (normalize-ftp-path "/" "") "/")
 ;  (is (normalize-ftp-path "/" nil) "/")
@@ -60,9 +53,8 @@
 ;  (is (normalize-ftp-path "/foo/" "/bar") "/bar")
 ;  (is (normalize-ftp-path "/foo/" "/bar/baz") "/bar/baz")
 ;  (is (normalize-ftp-path "/foo/" "/bar/baz/") "/bar/baz/")
-;  (is (thrown? AssertionError (normalize-ftp-path "foo/" "bar")))
 ;  (is (thrown? AssertionError (normalize-ftp-path "/foo" "bar")))
-;  )
+;  (is (thrown? AssertionError (normalize-ftp-path "foo/" "bar"))))
 ;
 ;(deftest process-up-dir-test
 ;  (is= (process-up-dir "/foo/../") "/")
@@ -72,8 +64,7 @@
 ;  (is= (process-up-dir "/foo/bar/../") "/foo/")
 ;  (is= (process-up-dir "/foo/bar/..") "/foo/")
 ;  (is= (process-up-dir "/foo/bar") "/foo/bar")
-;  (is (thrown? AssertionError (process-up-dir "foo/bar/../")))
-;  )
+;  (is (thrown? AssertionError (process-up-dir "foo/bar/../"))))
 
 (deftest do-cd-test
   (testing "cd"
@@ -81,10 +72,11 @@
     (ftp/change-dir *client* "foo")
     (is= (ftp/pwd *client*) "/foo/")))
 
-(deftest do-pwd-test
-  (testing "pwd"
-    (is= (ftp/pwd *client*) "/")
-    (is= (ftp/pwd (ftp/mk-client (str *ftp-url* "/foo"))) "/foo/")))
+;(deftest do-pwd-test
+;  (testing "pwd"
+;    (is= (ftp/pwd client) "/")
+;;    (is= (ftp/pwd (ftp/mk-client (str ftp-url "/foo"))) "/foo/")
+;    ))
 
 ;(deftest do-download-test
 ;  ; with absolute path

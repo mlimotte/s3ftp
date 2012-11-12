@@ -1,8 +1,29 @@
 s3 ftp service
 
+Current version supports Reads from s3 (i.e. ftp ls, get, etc)
+
 BUILDING
 
+lein deps
+?
 
+
+RUNNING
+
+lein run s3ftp.Main
+# for unit tests, remember to set
+s3ftp.s3_ftplet_test#start-server? = false
 
 TESTING
 
+lein test
+lein test s3ftp.s3_ftplet_test
+
+For unit tests, usually set
+s3ftp.s3_ftplet_test#start-server? = true
+
+
+USEFUL COMMAND LINES
+
+ftp ftp://anonymous:user%40host.com@ftp2.census.gov/geo/tiger/TIGER2008/
+s3cmd --config ~/aws/macs.s3cfg ls s3://allcitysoftware.file-service/test/

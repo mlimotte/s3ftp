@@ -1,8 +1,9 @@
 (ns s3ftp.util.ftp
-  (:require [clojure.contrib [logging :as logging]])
+  (:require [clojure.tools [logging :as logging]])
   (:import [org.apache.commons.net.ftp FTP FTPClient FTPReply]
-           [java.net URL])
-  (:use [clojure.contrib.str-utils :as str]))
+           [java.net URL]))
+
+;; This code is mostly used for the test client
 
 ;; simple wrappers for jakarta's ftp client
 ;; Based on code Kyle Burton: https://github.com/kyleburton/sandbox/blob/master/clojure-utils/kburton-clojure-utils/src/main/clj/com/github/kyleburton/sandbox/ftp.clj
@@ -22,18 +23,14 @@
     client))
 
 (defn mk-client [url]
-  (let [u# (URL. url)
-        client# (open u#)
-        ]
-    (if (.getUserInfo u#)
-      (let [[uname# pass#] (.split (.getUserInfo u#) ":" 2)]
-        (.login client# uname# pass#)))
-    (.changeWorkingDirectory client# (.getPath u#))
-    (.setFileType client# FTP/BINARY_FILE_TYPE)
-    client#
-    ))
-
-;(def client (memoize mk-client))
+  (let [url (URL. url)
+        client (open url)]
+    (if (.getUserInfo url)
+      (let [[uname pass] (.split (.getUserInfo url) ":" 2)]
+        (.login client uname pass)))
+    (.changeWorkingDirectory client (.getPath url))
+    (.setFileType client FTP/BINARY_FILE_TYPE)
+    client))
 
 ;;;
 

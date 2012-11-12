@@ -1,6 +1,6 @@
 (ns s3ftp.util.test
-  (:use clojure.test)
-  (:require [clojure.contrib [string :as string]]))
+  (:use clojure.test
+        [clojure.string :only [join]]))
 
 (defmacro is=
   "Use inside (deftest) to do an equality test."
@@ -15,4 +15,4 @@
 (defn causal-msgs [e]
   (let [es (take-while (complement nil?) (iterate #(.getCause %) e))
         msgs (map #(str "[" % "]") es)]
-    (string/join " caused by " msgs)))
+    (join " caused by " msgs)))

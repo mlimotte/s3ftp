@@ -1,9 +1,9 @@
 (ns s3ftp.Main
   (:gen-class)
-  (:use [s3ftp.s3_ftplet :only [the-ftplet]])
+  (:use [s3ftp.s3_ftplet :only [the-ftplet]]
+        [s3ftp.core :only [ifp]])
   (:require
-   [clojure.contrib [reflect :as reflect]
-                    [io :as io]]
+   clojure.java.io
    [s3ftp [sdb_user_manager :as um]])
   (:import
     [org.apache.ftpserver FtpServerFactory ConnectionConfigFactory]
@@ -22,7 +22,7 @@
 
 (defn properties-user-manager-factory [fname]
   (doto (PropertiesUserManagerFactory.)
-        (.setFile (io/file fname))))
+        (.setFile (clojure.java.io/file fname))))
 
 (defn properties-user-manager [& args]
   (.createUserManager (apply properties-user-manager-factory args)))
@@ -38,8 +38,7 @@
     ;??? factory.setImplicitSsl(true);
     (doto (ListenerFactory.)
           (.setPort port)
-          (.setIdleTimeout 60)
-      )))
+          (.setIdleTimeout 60))))
 
 (defn listener [& args]
   (.createListener (apply listener-factory args)))
@@ -69,4 +68,3 @@
       (.start srvr))
     ; return the server in case this method is called from somewhere else that might also want to stop the server (e.g. unit tests)
     srvr))
-

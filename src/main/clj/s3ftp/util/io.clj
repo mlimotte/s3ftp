@@ -1,5 +1,5 @@
 (ns s3ftp.util.io
-  (:require [clojure.contrib [io :as io]])
+  (:require [clojure.java [io :as io]])
   (:import java.io.StringWriter)
   )
 

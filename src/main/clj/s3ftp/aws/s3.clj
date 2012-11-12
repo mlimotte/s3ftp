@@ -1,43 +1,47 @@
 (ns s3ftp.aws.s3
   (:use s3ftp.aws.aws
-        [clojure.contrib.def :only [defnk]])
-  (:require [clojure.contrib [string :as string]])
+        s3ftp.pallet.thread-expr)
+  (:require [clojure [string :as string]]
+            [clojure.tools.trace :as trace]
+            [clojure.tools.logging :as log]
+            )
   (:import com.amazonaws.services.s3.AmazonS3Client
            [com.amazonaws.services.s3.model GetObjectRequest
                                             ListObjectsRequest
                                             ObjectMetadata
-                                            S3Object
-                                            ]
-   ))
+                                            S3Object]))
 
 ;;; Service
 
-(def *max-list-results* 2048)
+(def max-list-results 2048)
 
-(def s3-client (memoize (fn [creds] (AmazonS3Client. creds))))
+;(def s3-client (memoize (fn [creds] (AmazonS3Client. creds))))
+(trace/deftrace s3-client [creds] (AmazonS3Client. creds))
 
 
 ;;; Helpers
 
-(defn- test-apply [test-f apply-f s]
-  (if (test-f s) s (apply-f s)))
+(defn chop [s]
+  (cond
+    (= s "") ""
+    (nil? s) nil
+    :else    (subs s 0 (-> s count dec))))
 
-(defn leading-slash-test [s] (= (subs s 0 1) "/"))
+(defn leading-slash? [s] (= (subs s 0 1) "/"))
+
+(defn trailing-slash? [s] (= (last s) \/))
 
 (defn ensure-leading-slash [s]
-  (test-apply leading-slash-test #(str "/" %) s))
-     
-(defn ensure-no-leading-slash [s]
-  (test-apply (complement leading-slash-test) #(string/drop 1 %) s))
+  (if (leading-slash? s) s (str "/" s)))
 
-(defn trailing-slash-test [s]
-  (= (last s) \/))
+(defn ensure-no-leading-slash [s]
+  (if (leading-slash? s) (subs s 1) s))
 
 (defn ensure-trailing-slash [s]
-  (test-apply trailing-slash-test #(str % "/") s))
+  (if (trailing-slash? s) s (str s "/")))
 
 (defn ensure-no-trailing-slash [s]
-  (test-apply (complement trailing-slash-test) string/chop s))
+  (if (trailing-slash? s) (chop s) s))
 
 
 ;;; Download
@@ -75,16 +79,41 @@
 ;;bad secret - AmazonS3Exception
 ;;bad access-id - AmazonS3Exception
 
-(defnk ls [bucket path client :use-trailing-slash true]
-  (let [path (ensure-no-leading-slash path)
-        path (if use-trailing-slash (ensure-trailing-slash path)
-                 path)
-	      req (ListObjectsRequest. bucket path nil "/" *max-list-results*)]
+;(defnk ls [bucket path client :use-trailing-slash true]
+;  (let [path (ensure-no-leading-slash path)
+;        path (if use-trailing-slash (ensure-trailing-slash path)
+;                 path)
+;	      req (ListObjectsRequest. bucket path nil "/" max-list-results)]
+;    (.listObjects client req)))
+
+(trace/deftrace ls [bucket path client & {:keys [use-trailing-slash] :or [true]}]
+  (let [
+;        path (ensure-no-leading-slash path)
+;        path (if use-trailing-slash
+;               (ensure-trailing-slash path)
+;               path)
+        path (-> path
+               ensure-no-leading-slash
+               (if-> use-trailing-slash
+                 ensure-trailing-slash
+                 identity)
+        )
+	      _ (log/debug (format "ListObjectsRequest. %s %s %s %s %s" bucket path nil "/" max-list-results))
+        req
+          (try
+            (ListObjectsRequest. bucket path nil "/" (Integer. max-list-results))
+            (catch Exception e (log/debug "MARC" e)))
+        ]
+    (log/debug (str "ls path3 " path))
+    (log/debug (str "ls req " req))
     (.listObjects client req)))
 
-(defn strip-prefixes [obj-listing coll]
-     (let [prefix-pattern (re-pattern (.getPrefix obj-listing))]
-       (map #(string/replace-first-re prefix-pattern "" %) coll)))
+(trace/deftrace strip-prefixes [obj-listing coll]
+  (-> obj-listing
+    .getPrefix
+    ;re-pattern -- these are all literal strings, not regexes
+    (arg-> [prefix-pattern] #(string/replace-first % prefix-pattern ""))
+    (map coll)))
 
 ;; a/b/c.txt
 ;; a/d.txt
@@ -93,25 +122,24 @@
 ;; (dirs ... "a" -> "b"
 ;; (dirs ... "a/" -> "b"
 
-(defn files
+(trace/deftrace files
   ([obj-listing]
      (let [summaries (.getObjectSummaries obj-listing)
 	   keys (map #(.getKey %) summaries)]
        (strip-prefixes obj-listing keys))))
 
-(defn dirs
+(trace/deftrace dirs
   ([obj-listing]
      (->> obj-listing
           .getCommonPrefixes
-          (map #(string/butlast 1 %))
+          (map chop)
           (strip-prefixes obj-listing))))
 
 (defn truncated? [obj-listing] (.isTruncated obj-listing))
 
-(defn dir-exists? [bucket path client]
-  (let [obj-listing (ls bucket path client)
-        not-empty? (complement empty?)]
-    (or (not-empty? (dirs obj-listing))
-        (not-empty? (files obj-listing)))))
+(trace/deftrace dir-exists? [bucket path client]
+  (let [obj-listing (ls bucket path client)]
+    (or (seq (dirs obj-listing))
+        (seq (files obj-listing)))))
 
 

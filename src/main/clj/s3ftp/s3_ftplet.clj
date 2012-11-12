@@ -1,9 +1,10 @@
 (ns s3ftp.s3_ftplet
-  (:use [s3ftp.util.test :only [pfr]])
+  (:use [s3ftp.util.test :only [pfr]]
+        [s3ftp.core :only [ifp]])
   (:require
-   [clojure.contrib [io :as io]
-                    [string :as string]
-                    [logging :as logging]]
+   [clojure.tools.logging :as log]
+   [clojure.tools.trace :as trace]
+   [clojure.string :as string]
    [s3ftp.util [io :as util-io] [test :as test]]
    [s3ftp.aws [s3 :as s3] [aws :as aws]]
    [clj-time [core :as time] [format :as timef] [coerce :as timec]])
@@ -19,9 +20,8 @@
 (def user-data {
   :bucket "allcitysoftware.file-service"
   :root-prefix "/test"
-  :access-id aws/*macs-access-id*
-  :secret-key aws/*macs-secret-key*
-  })
+  :access-id aws/macs-access-id
+  :secret-key aws/macs-secret-key})
 
 ;;; Path Translation and Management
 
@@ -29,27 +29,30 @@
 ;; - (user-data :root-prefix) always starts with "/" and ends with no "/"
 ;; - session "pwd" always starts and ends with "/"
 
-(defn abs-with-trail-slash? [path] (re-find #"^/.*/$|^/$" path))
 (defn abs-path? [path] (re-find #"^/" path))
 
-(defn process-up-dir [path]
+(defn process-up-dir
+  "path must be absolute. Process .. in a path string, moving up one level."
+  [path]
   {:pre [(abs-path? path)]}
-  (let [s (string/replace-re #"[^/]*/\.\.(?:$|/)" "" path)]
-    (if (string/blank? s) "/" s)))
+  (ifp (string/replace path #"[^/]*/\.\.(?:$|/)" "")
+    string/blank?
+    (constantly "/")
+    :>> identity))
 
-(defn normalize-ftp-path [pwd path]
-  {:pre [(abs-with-trail-slash? pwd)]}
-  ; path can be relative or absolute
-  (let [path (if (string/blank? path) "/" path)
-        path (if (s3/leading-slash-test path) path (str pwd path))
-        path (process-up-dir path)]
-    path))
+(defn normalize-ftp-path
+  "path can be relative or absolute; and must end with a slash."
+  [pwd path]
+  {:pre [(s3/trailing-slash? pwd) (abs-path? pwd)]}
+  (-> (if (string/blank? path) "/" path)
+    (ifp s3/leading-slash? identity :>> (partial str pwd))
+    process-up-dir))
 
 (defn as-s3-path [session ftp-path]
   {:pre [(abs-path? ftp-path)]}
   (let [path (str (user-data :root-prefix) ftp-path)
         path (s3/ensure-no-leading-slash path)]
-    (logging/debug (str "as-s3-path " ftp-path " => " path))
+    (log/debug (str "as-s3-path " ftp-path " => " path))
     path))
 
 (defn get-pwd [session]
@@ -67,7 +70,7 @@
 (defn creds [user-data]
   (aws/creds (:access-id user-data) (:secret-key user-data)))
 
-(defn s3-client [user-data] (s3/s3-client (creds user-data)))
+(trace/deftrace s3-client [user-data] (s3/s3-client (creds user-data)))
 
 ;;; FTP Protocol
 
@@ -79,7 +82,7 @@
   ([session args] (apply write-reply session args)))
 
 (defn open-data-connection [session]
-  (logging/debug (str "Opening data connection for " session))
+  (log/debug (str "Opening data connection for " session))
   (.. session getDataConnection openConnection))
 
 (defn close-data-connection [session]
@@ -101,7 +104,7 @@
          (write-reply session complete-reply)
          (catch Exception e
            (write-reply session (concat xfer-fail-reply [" " (test/causal-msgs e)]))
-           (logging/error "xfer failed" e))
+           (log/error "xfer failed" e))
          (finally
            (if (instance? java.io.InputStream data)
                (.close data))
@@ -109,20 +112,20 @@
     (catch AmazonServiceException e
       ;file (status code 404) / bucket (status code 403) not found
       (write-reply session 550 (test/causal-msgs e))
-      (logging/error "xfer failed" e))
+      (log/error "xfer failed" e))
     (catch AmazonClientException e
       ; network connection not working
       (write-reply session 451 (test/causal-msgs e))
-      (logging/error "xfer failed" e))
+      (log/error "xfer failed" e))
     (catch IOException e
       ; Other FTP exceptions
       (write-reply session 425 "Cannot open data connection: " (test/causal-msgs e))
-      (logging/error "xfer failed" e))
+      (log/error "xfer failed" e))
     (catch Exception e
       ; catch-all
       (write-reply session 425 "Unknown error: " (test/causal-msgs e))
-      (logging/error (str (-> e .getName .getClass) ": " (test/causal-msgs e)))
-      (logging/error "xfer failure." e)
+      (log/error (str (-> e .getName .getClass) ": " (test/causal-msgs e)))
+      (log/error "xfer failure." e)
       (throw e))))
 
 
@@ -203,18 +206,18 @@
       ;status code: 404  (file not found)
       ;status code: 403  (for bad bucket name)
       (write-reply session 550 (test/causal-msgs e))
-      (logging/error "do-meta-data Failure" e))
+      (log/error "do-meta-data Failure" e))
     (catch AmazonClientException e
       ; network connection not working
       (write-reply session 451 (test/causal-msgs e))
-      (logging/error "do-meta-data Failure" e))))
+      (log/error "do-meta-data Failure" e))))
 
 (defn do-size [session request] (do-meta-data session request s3/size))
 
-(def *mdtm-datetime-format* (timef/formatter "yyyyMMddHHmmss.SSS"))
+(def mdtm-datetime-format (timef/formatter "yyyyMMddHHmmss.SSS"))
 (defn do-last-modified [session request]
   (do-meta-data session request
-                #(->> % s3/last-mod timec/from-date (timef/unparse *mdtm-datetime-format*))))
+                #(->> % s3/last-mod timec/from-date (timef/unparse mdtm-datetime-format))))
 
 
 ;;; Directories
@@ -222,13 +225,20 @@
 (defn do-cwd [session request]
   (let [requested-wd (.getArgument request)
         newpwd (normalize-ftp-path (get-pwd session) requested-wd)
-        newpwd (s3/ensure-trailing-slash newpwd)]
-    (logging/debug (str "do-cwd " newpwd))
+        newpwd (s3/ensure-trailing-slash newpwd)
+
+
+        s3client (s3-client user-data)
+
+
+        ]
+    (log/debug (str "do-cwd " newpwd))
+    (log/debug (str "do-cwd s3client " s3client))
     (if (= (get-pwd session) newpwd)
       (write-reply session 250 "Command okay.")
       (if (s3/dir-exists? (user-data :bucket)
                           (as-s3-path session newpwd)
-                          (s3-client user-data))
+                          s3client)
         (do (set-pwd session newpwd)
           (write-reply session 250 "Command okay."))
         (write-reply session 550 "No such directory.")))))
@@ -259,10 +269,10 @@
 
 ;;; List
 
-;(def *ls-datetime-format* (timef/formatter "MMM dd yyyy HH:mm:ss"))
-(def *ls-datetime-format* (timef/formatter "MMM dd yyyy"))
+;(def ls-datetime-format (timef/formatter "MMM dd yyyy HH:mm:ss"))
+(def ls-datetime-format (timef/formatter "MMM dd yyyy"))
 (defn date-for-ls [d]
-  (timef/unparse *ls-datetime-format* (timec/from-date d)))
+  (timef/unparse ls-datetime-format (timec/from-date d)))
 
 ;150 Here comes the directory listing.
 ;drwxrwsr-x    2 0        4009         4096 Nov 26  2008 42133_York_County
@@ -285,9 +295,9 @@
         files (.getObjectSummaries obj-list)
         file-f (juxt #(-> % .getOwner .getDisplayName)
                      #(-> % .getOwner .getDisplayName) ; group
-                     #(.getSize %)
+                     (memfn getSize)
                      #(-> % .getLastModified date-for-ls)
-                     #(string/replace-first-re #"^.*/" "" (.getKey %)))
+                     #(-> % .getKey (string/replace-first #"^.*/" "")))
         file-records (map file-f files)
         file-fmt-str "-rw-rw----    1 %-11s %-11s %12d %s %s\r\n"
         file-listings (map #(apply format file-fmt-str %) file-records)
